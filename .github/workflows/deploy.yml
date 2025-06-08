@@ -1,0 +1,63 @@
+name: Deploy to Azure Functions
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+      - main
+
+env:
+  AZURE_FUNCTIONAPP_NAME: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+  AZURE_FUNCTIONAPP_PUBLISH_PROFILE: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: 'src'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/main' && 'prod' || 'dev' }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run tests
+      run: |
+        python -m pytest tests/
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+
+    - name: Deploy to Azure Functions
+      uses: Azure/functions-action@v1
+      with:
+        app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+        package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+        publish-profile: ${{ env.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
+        enable-oryx-build: true
+        scm-do-build-during-deployment: true
+
+    - name: Wait for deployment to be ready
+      run: |
+        echo "Waiting for function app to be ready..."
+        sleep 30
+        
+    - name: Setup Telegram Webhook
+      run: |
+        python src/webhook_setup.py \
+          --webhook-url "https://${{ env.AZURE_FUNCTIONAPP_NAME }}.azurewebsites.net/api/telegram-webhook"
+      env:
+        TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }} 
